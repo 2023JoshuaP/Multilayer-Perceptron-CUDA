@@ -157,3 +157,37 @@ pair<Matrix, Matrix> DataLoader::load_csv_data(const string &csv_path, const str
 
     return {move(X), move(Y)};
 }
+
+/* Accuracy calculate */
+double DataLoader::accuracy(const Matrix& predictions, const Matrix& trues) {
+    int total = predictions.rows;
+    int cols = predictions.cols;
+
+    vector<double> h_pred(total * cols);
+    vector<double> h_trues(total * cols);
+    trues.toHost(h_trues.data());
+
+    int correct = 0;
+    for (int i = 0; i < total; i++) {
+        int pred_label = 0;
+        double best = h_pred[i * cols];
+        for (int j = 1; j < cols; j++) {
+            if (h_pred[i * cols + j] > best) {
+                best = h_pred[i * cols + j];
+                pred_label = j;
+            }
+        }
+
+        int true_label = 0;
+        for (int j = 1; j < cols; j++) {
+            if (h_trues[i * cols + j] > h_trues[i * cols + true_label]) {
+                true_label = j;
+            }
+        }
+        if (pred_label == true_label) {
+            correct++;
+        }
+    }
+
+    return static_cast<double>(correct) / total * 100.0;
+}
