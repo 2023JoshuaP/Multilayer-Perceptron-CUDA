@@ -68,3 +68,30 @@ __global__ void mlp_reduce_sum_kernel(const double* data, double* partial, int n
         partial[blockIdx.x] = s_data[0];
     }
 }
+
+/* Helper function to calculate number of blocks */
+static inline int grid1d(int n, int block = 256) {
+    return (n + block - 1) / block;
+}
+
+/* Sum of vector on GPU */
+static double sum_gpu(const double *d_data, int n) {
+    const int block = 256;
+    const int g = grid1d(n, block);
+    double *d_oartial;
+
+    CUDA_CHECK(cudaMalloc(&d_partial, g * sizeof(double)));
+    mlp_reduce_sum_kernel<<<g, block, block * sizeof(double)>>> (d_data, d_partial, n);
+    CUDA_CHECK(cudaGetLastError());
+
+    vector<double> h_partial(g);
+    CUDA_CHECK(cudaMemCpy(h_partial.data(), d_partial, g * sizeof(double), cudaMemcpyDeviceToHost));
+    CUDA_CHECK(cudaFree(d_partial));
+
+    double total = 0;
+    for (double v : h_partial) {
+        total += v;
+    }
+
+    return total;
+}
