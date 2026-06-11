@@ -54,7 +54,7 @@ __global__ void mlp_reduce_sum_kernel(const double* data, double* partial, int n
     extern __shared__ double s_data[];
     int tid = threadIdx.x;
     int idx = blockIdx.x * blockDim.x + tid;
-    s_data[tid] = (idx < n) ? data[idx];
+    s_data[tid] = (idx < n) ? data[idx] : 0.0;
     __syncthreads();
     
     for (int s = blockDim.x / 2; s > 0; s >>= 1) {
@@ -78,14 +78,14 @@ static inline int grid1d(int n, int block = 256) {
 static double sum_gpu(const double *d_data, int n) {
     const int block = 256;
     const int g = grid1d(n, block);
-    double *d_oartial;
+    double *d_partial;
 
     CUDA_CHECK(cudaMalloc(&d_partial, g * sizeof(double)));
     mlp_reduce_sum_kernel<<<g, block, block * sizeof(double)>>> (d_data, d_partial, n);
     CUDA_CHECK(cudaGetLastError());
 
     vector<double> h_partial(g);
-    CUDA_CHECK(cudaMemCpy(h_partial.data(), d_partial, g * sizeof(double), cudaMemcpyDeviceToHost));
+    CUDA_CHECK(cudaMemcpy(h_partial.data(), d_partial, g * sizeof(double), cudaMemcpyDeviceToHost));
     CUDA_CHECK(cudaFree(d_partial));
 
     double total = 0;
@@ -94,4 +94,44 @@ static double sum_gpu(const double *d_data, int n) {
     }
 
     return total;
+}
+
+MultiLayerPerceptron::MultiLayerPerceptron(const vector<int> &layer_sizes, shared_ptr<ActivationFunction> activation, double learning_rate, double momentum, double weight_decay, int seed) : layer_sizes_(layer_sizes), activation_(activation), learning_rate_(learning_rate), momentum_(momentum), weight_decay_(weight_decay), num_layers_(static_cast<int>(layer_sizes.size())), rng_(seed) {
+    mt19937 init_rng(seed);
+    for (int i = 0; i < num_layers_ - 1; i++) {
+        int fan_in = layer_sizes_[i];
+        int fan_out = layer_sizes_[i + 1];
+        double scale = sqrt(2.0 / fan_in);
+        weights_.push_back(gpu_random(fan_in, fan_out, scale, init_rng));
+        biases_.push_back(gpu_zeros(1, fan_out));
+        vel_weights_.push_back(gpu_zeros(fan_in, fan_out));
+        vel_biases_.push_back(gpu_zeros(1, fan_out));
+    }
+}
+
+vector<Matrix> MultiLayerPerceptron::forward(const Matrix &input) const {
+    vector<Matrix> activations;
+    activations.reserve(num_layers_);
+    activations.push_back(input);
+
+    int n_weight_layers = num_layers_ - 1;
+    Matrix A = input;
+    for (int i = 0; i < n_weight_layers; i++) {
+        Matrix Z = A.dot(weights_[i]);
+        int total = Z.rows * Z.cols;
+
+        bias_add_kernel<<<grid1d(total), 256>>> (Z.d_data, biases_[i].d_data, Z.rows, Z.cols);
+        CUDA_CHECK(cudaGetLastError());
+
+        if (i == n_weight_layers - 1) {
+            A = Softmax::forward(Z);
+        }
+        else {
+            A = activation_->forward(Z);
+        }
+
+        activations.push_back(A);
+    }
+
+    return activations;
 }
