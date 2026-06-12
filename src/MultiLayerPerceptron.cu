@@ -135,3 +135,150 @@ vector<Matrix> MultiLayerPerceptron::forward(const Matrix &input) const {
 
     return activations;
 }
+
+void MultiLayerPerceptron::backward(const vector<Matrix> &activations, const Matrix &y_true) {
+    int n = num_layers_ - 1;
+    int n_lay = num_layers_ - 1;
+
+    vector<Matrix> dW(n_lay);
+    vector<Matrix> dB(n_lay);
+
+    Matrix delta = activations.back() - y_true;
+
+    for (int i = n_lay - 1; i >= 0; i--) {
+        dW[i] = activations[i].transpose().dot(delta) / n;
+        dB[i] = delta.col_mean();
+
+        if (i > 0) {
+            Matrix dA = delta.dot(weights_[i].transpose());
+            Matrix derivate = activation_->derivative(activations[i]);
+            delta = dA.hadamard(derivate);
+        }
+    }
+
+    for (int i = 0; i < n_lay; i++) {
+        int nw = weights_[i].rows * weights_[i].cols;
+        sgd_momentun_kernel<<<grid1d(nw), 256>>> (weights_[i].d_data, vel_weights_[i].d_data, dW[i].d_data, nw, learning_rate_, momentum_, weight_decay_);
+        CUDA_CHECK(cudaGetLastError());
+
+        int nb = biases_[i].cols;
+        sgd_momentun_bias_kernel<<<grid1d(nb), 256>>> (biases_[i].d_data, vel_biases_[i].d_data, dB[i].d_data, nb, learning_rate_, momentum_);
+        CUDA_CHECK(cudaGetLastError());
+    }
+}
+
+double MultiLayerPerceptron::mse_loss(const Matrix &y_pred, const Matrix &y_true) {
+    int n = y_pred.size();
+    double *d_loss;
+
+    CUDA_CHECK(cudaMalloc(&d_loss, n * sizeof(double)));
+    mse_element_kernel<<<grid1d(n), 256>>> (y_pred.d_data, y_true.d_data, d_loss, n);
+    CUDA_CHECK(cudaGetLastError());
+
+    double total_loss = sum_gpu(d_loss, n);
+    cudaFree(d_loss);
+
+    return total_loss / n;
+}
+
+void MultiLayerPerceptron::shuffle_data(Matrix &X, Matrix &y) {
+    int n = X.rows;
+    vector<int> indexes(n);
+    iota(indexes.begin(), indexes.end(), 0);
+    shuffle(indexes.begin(), indexes.end(), rng_);
+
+    vector<double> h_X(n * X.cols);
+    vector<double> h_y(n * y.cols);
+    X.toHost(h_X.data());
+    y.toHost(h_y.data());
+    vector<double> h_X_shuffled(n * X.cols);
+    vector<double> h_y_shuffled(n * y.cols);
+    
+    for (int i = 0; i < n; i++) {
+        for (int j = 0; j < X.cols; j++) {
+            h_X_shuffled[i * X.cols + j] = h_X[indexes[i] * X.cols + j];
+        }
+        for (int j = 0; j < y.cols; j++) {
+            h_y_shuffled[i * y.cols + j] = h_y[indexes[i] * y.cols + j];
+        }
+    }
+
+    X.fromHost(h_X_shuffled.data());
+    y.fromHost(h_y_shuffled.data());
+}
+
+TrainHistory MultiLayerPerceptron::train(const Matrix &X, const Matrix &y, int epochs, int batch_size, const Matrix *X_val, const Matrix *y_val, bool verbose, int patience) {
+    TrainHistory history;
+    bool has_val = (X_val != nullptr && y_val != nullptr);
+
+    Matrix X_train = X;
+    Matrix y_train = y;
+
+    int n = X_train.rows;
+    int batches = (n + batch_size - 1) / batch_size;
+
+    double best_value_loss = 1e18;
+    int epochs_no_improve = 0;
+    vector<Matrix> best_weights = weights_;
+    vector<Matrix> best_biases = biases_;
+
+    for (int epoch = 1; epoch <= epochs; epoch++) {
+        shuffle_data(X_train, y_train);
+        double epoch_loss = 0.0;
+
+        for (int b = 0; b < batches; b++) {
+            int start = b * batch_size;
+            int end = min(start * batch_size, n);
+            Matrix X_batch = X_train.slice(start, end);
+            Matrix y_batch = y_train.slice(start, end);
+            auto activations = forward(X_batch);
+            double batch_loss = mse_loss(activations.back(), y_batch);
+            epoch_loss += batch_loss;
+
+            backward(activations, y_batch);
+        }
+
+        epoch_loss /= batches;
+        history.train_losses.push_back(epoch_loss);
+        double value_loss = 0.0;
+
+        if (has_val) {
+            Matrix value_predice = predict(*X_val);
+            value_loss = mse_loss(value_predice, *y_val);
+            history.val_losses.push_back(value_loss);
+
+            if (value_loss < best_value_loss) {
+                best_value_loss = value_loss;
+                epochs_no_improve = 0;
+                best_weights = weights_;
+                best_biases = biases_;
+            }
+            else {
+                epochs_no_improve++;
+            }
+
+            if (epochs_no_improve >= patience) {
+                if (verbose) {
+                    cout << "Early stopping at epoch " << epoch << " (best val loss: " << fixed << setprecision(4) << best_value_loss << ")" << endl;
+                }
+                weights_ = best_weights;
+                biases_ = best_biases;
+                break;
+            }
+        }
+
+        if (verbose && (epoch % max(1, epochs / 10) == 0 || epoch == 1)) {
+            cout << "Epoch " << epoch << "/" << epochs << " - Train Loss: " << fixed << setprecision(4) << epoch_loss;
+            if (has_val) {
+                cout << " - Val Loss: " << fixed << setprecision(4) << value_loss;
+            }
+            cout << endl;
+        }
+    }
+
+    return history;
+}
+
+Matrix MultiLayerPerceptron::predict(const Matrix &X) const {
+    return forward(X).back();
+}
