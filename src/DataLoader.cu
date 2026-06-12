@@ -54,7 +54,6 @@ void DataLoader::load_symbols(const string &symbols_csv) {
 
     NUM_CLASSES = index;
     file.close();
-    cout << "Loaded" << NUM_CLASSES << "symbols "
 }
 
 /* Load data from CSV file */
@@ -98,7 +97,7 @@ pair<Matrix, Matrix> DataLoader::load_csv_data(const string &csv_path, const str
         }
         int label = it->second;
 
-        fs::path full_path = fs::path(base_dir) / img_rel_path:
+        fs::path full_path = fs::path(base_dir) / img_rel_path;
         cv::Mat image = cv::imread(full_path.string(), cv::IMREAD_GRAYSCALE);
         if (image.empty()) {
             skipped++;
@@ -121,9 +120,7 @@ pair<Matrix, Matrix> DataLoader::load_csv_data(const string &csv_path, const str
         labels.push_back(label);
         loaded++;
 
-        if (loaded % 5000 == 0) {
-            cout << "Loaded " << loaded << " images..." << endl;
-        }
+
     }
 
     int N = static_cast<int>(rows_x.size());
@@ -132,10 +129,7 @@ pair<Matrix, Matrix> DataLoader::load_csv_data(const string &csv_path, const str
         throw runtime_error("No valid images found");
     }
 
-    cout << "Loaded " << loaded << " images" << endl;
-    if (skipped > 0) {
-        cout << "Skipped " << skipped << " images" << endl;
-    }
+
 
     vector<double> h_X(N * flat_size);
     for (int i = 0; i < N; i++) {
@@ -145,7 +139,7 @@ pair<Matrix, Matrix> DataLoader::load_csv_data(const string &csv_path, const str
     }
 
     Matrix X(N, flat_size);
-    X.from_host(h_X.data());
+    X.fromHost(h_X.data());
 
     vector<double> h_Y(N * NUM_CLASSES, 0.0);
     for (int i = 0; i < N; i++) {
@@ -153,7 +147,7 @@ pair<Matrix, Matrix> DataLoader::load_csv_data(const string &csv_path, const str
     }
 
     Matrix Y(N, NUM_CLASSES);
-    Y.from_host(h_Y.data());
+    Y.fromHost(h_Y.data());
 
     return {move(X), move(Y)};
 }
@@ -165,6 +159,7 @@ double DataLoader::accuracy(const Matrix& predictions, const Matrix& trues) {
 
     vector<double> h_pred(total * cols);
     vector<double> h_trues(total * cols);
+    predictions.toHost(h_pred.data());
     trues.toHost(h_trues.data());
 
     int correct = 0;

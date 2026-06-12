@@ -228,7 +228,7 @@ TrainHistory MultiLayerPerceptron::train(const Matrix &X, const Matrix &y, int e
 
         for (int b = 0; b < batches; b++) {
             int start = b * batch_size;
-            int end = min(start * batch_size, n);
+            int end = min(start + batch_size, n);
             Matrix X_batch = X_train.slice(start, end);
             Matrix y_batch = y_train.slice(start, end);
             auto activations = forward(X_batch);
