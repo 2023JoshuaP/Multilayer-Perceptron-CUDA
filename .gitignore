@@ -3,3 +3,4 @@ HASYv2.tar.bz2
 build/
 Makefile
 simpsons-mnist
+mlp_cuda
