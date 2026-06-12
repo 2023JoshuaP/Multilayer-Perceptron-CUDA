@@ -4,3 +4,4 @@ build/
 Makefile
 simpsons-mnist
 mlp_cuda
+MLP_CUDA/

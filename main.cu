@@ -50,31 +50,26 @@ int main(int argc, char* argv[]) {
         cout << "Fold " << i << " Test Accuracy: " << fixed << setprecision(2) << test_accuracy << "%" << endl;
         total_accuracy += test_accuracy;
 
-        // ── Sample Predictions ─────────────────────────────────
         int test_n = X_test.rows;
         int num_cols = test_predictions.cols;
         constexpr int NUM_SAMPLES = 20;
         constexpr int IMG_SIZE = 32;
         int flat_size = IMG_SIZE * IMG_SIZE;
 
-        // Copy predictions and labels to host
         vector<double> h_pred(test_n * num_cols);
         vector<double> h_true(test_n * num_cols);
         test_predictions.toHost(h_pred.data());
         y_test.toHost(h_true.data());
 
-        // Copy image data to host
         vector<double> h_X(test_n * flat_size);
         X_test.toHost(h_X.data());
 
-        // Pick random sample indices
         vector<int> indices(test_n);
         iota(indices.begin(), indices.end(), 0);
         mt19937 rng_vis(123);
         shuffle(indices.begin(), indices.end(), rng_vis);
         int n_show = min(NUM_SAMPLES, test_n);
 
-        // Text-based predictions
         cout << "\n=== Sample Predictions (Test Set) ===" << endl;
         cout << left << setw(8) << "Sample"
              << setw(20) << "Predicted"
@@ -82,7 +77,6 @@ int main(int argc, char* argv[]) {
              << "Result" << endl;
         cout << string(55, '-') << endl;
 
-        // Pre-compute labels for samples
         vector<int> pred_labels(n_show), true_labels(n_show);
         for (int s = 0; s < n_show; s++) {
             int idx = indices[s];
@@ -110,12 +104,11 @@ int main(int argc, char* argv[]) {
                  << (correct ? "OK" : "FAIL") << endl;
         }
 
-        // ── OpenCV Visual Grid ─────────────────────────────────
-        constexpr int SCALE = 3;              // 32 -> 96px per image
+        constexpr int SCALE = 3;
         constexpr int GRID_COLS = 5;
         constexpr int GRID_ROWS = 4;
         int cell_w = IMG_SIZE * SCALE;
-        int cell_h = IMG_SIZE * SCALE + 40;   // extra space for labels
+        int cell_h = IMG_SIZE * SCALE + 40;
         int grid_n = min(n_show, GRID_COLS * GRID_ROWS);
 
         cv::Mat grid(GRID_ROWS * cell_h, GRID_COLS * cell_w, CV_8UC3, cv::Scalar(40, 40, 40));
@@ -125,7 +118,6 @@ int main(int argc, char* argv[]) {
             int row = s / GRID_COLS;
             int col = s % GRID_COLS;
 
-            // Reconstruct 32x32 grayscale image
             cv::Mat img(IMG_SIZE, IMG_SIZE, CV_8UC1);
             for (int r = 0; r < IMG_SIZE; r++) {
                 for (int c = 0; c < IMG_SIZE; c++) {
@@ -134,7 +126,6 @@ int main(int argc, char* argv[]) {
                 }
             }
 
-            // Scale up and convert to color
             cv::Mat img_scaled, img_color;
             cv::resize(img, img_scaled, cv::Size(cell_w, IMG_SIZE * SCALE), 0, 0, cv::INTER_NEAREST);
             cv::cvtColor(img_scaled, img_color, cv::COLOR_GRAY2BGR);
@@ -142,16 +133,12 @@ int main(int argc, char* argv[]) {
             bool correct = (pred_labels[s] == true_labels[s]);
             cv::Scalar border_color = correct ? cv::Scalar(0, 200, 0) : cv::Scalar(0, 0, 220);
 
-            // Draw border
             cv::rectangle(img_color, cv::Point(0, 0),
                           cv::Point(cell_w - 1, IMG_SIZE * SCALE - 1), border_color, 2);
 
-            // Place image in grid
             int x0 = col * cell_w;
             int y0 = row * cell_h;
             img_color.copyTo(grid(cv::Rect(x0, y0, cell_w, IMG_SIZE * SCALE)));
-
-            // Label text below image
             string pred_text = "P: " + DataLoader::CLASS_NAMES[pred_labels[s]];
             string true_text = "T: " + DataLoader::CLASS_NAMES[true_labels[s]];
 
@@ -161,7 +148,6 @@ int main(int argc, char* argv[]) {
                         cv::FONT_HERSHEY_SIMPLEX, 0.35, cv::Scalar(200, 200, 200), 1);
         }
 
-        // Title
         cv::putText(grid, "MLP CUDA - Test Predictions (Fold " + to_string(i) + ")",
                     cv::Point(10, GRID_ROWS * cell_h - 5),
                     cv::FONT_HERSHEY_SIMPLEX, 0.5, cv::Scalar(180, 180, 180), 1);
